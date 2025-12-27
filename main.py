@@ -1,24 +1,28 @@
 from fastapi import FastAPI
-from routers import characters
 from fastapi.middleware.cors import CORSMiddleware
-from routers import builds
+from routers import characters, builds
 
 app = FastAPI()
 
-# Include routers
-app.include_router(characters.router, prefix="/api")
+# 1. DEFINE MIDDLEWARE FIRST
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Include builds router
+# 2. INCLUDE ROUTERS SECOND
+app.include_router(characters.router, prefix="/api")
 app.include_router(builds.router, prefix="/api/builds")
 
 @app.get("/")
 def read_root():
     return {"message": "Backend funcionando"}
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"], # Allow your Next.js app
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+from database import engine, Base
+from models import character, build, weapon, artifact # Import ALL models here
+
+# This line creates the tables if they don't exist
+Base.metadata.create_all(bind=engine)

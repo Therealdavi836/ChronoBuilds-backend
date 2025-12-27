@@ -1,44 +1,63 @@
+from sqlalchemy.orm import Session
 from models.character import Character
 from models.build import Build
-from sqlalchemy.orm import Session
+from models.weapon import Weapon
+from models.artifact import Artifact
 import json
 
-# Ejemplo simple de puntuación de armas y artefactos según rol
-weapon_scores = {
-    "Sword": {"DPS": 10, "Support": 5},
-    "Bow": {"DPS": 8, "Support": 4},
-    "Catalyst": {"DPS": 7, "Support": 6}
-}
+def score_weapon(weapon_type: str, role: str) -> int:
+    scoring = {
+        "Sword": {"DPS": 10, "Support": 5, "Healer": 3},
+        "Bow": {"DPS": 8, "Support": 4, "Healer": 2},
+        "Catalyst": {"DPS": 7, "Support": 6, "Healer": 5},
+        "Polearm": {"DPS": 9, "Support": 4, "Healer": 2},
+        "Claymore": {"DPS": 10, "Support": 3, "Healer": 2}
+    }
+    return scoring.get(weapon_type, {}).get(role, 0)
 
-artifact_sets = {
-    "Gladiator": {"DPS": 10, "Support": 5},
-    "Noblesse": {"DPS": 6, "Support": 10},
-    "Wanderer": {"DPS": 7, "Support": 6}
-}
+def score_artifact_set(artifact_role: str, character_role: str) -> int:
+    # Logic: 10 points if roles match perfectly, 5 otherwise
+    return 10 if artifact_role == character_role else 5
 
 def generate_build(character: Character, db: Session):
-    # Verificar si la build ya existe
+    # 1. Check if build already exists
     existing_build = db.query(Build).filter(Build.character_id == character.id).first()
     if existing_build:
         return existing_build
 
-    # Seleccionar arma y artefactos con mejor puntuación según rol
-    role = character.role  # DPS, Support, etc.
-    best_weapon = max(weapon_scores, key=lambda w: weapon_scores[w].get(role, 0))
-    best_artifacts = sorted(artifact_sets, key=lambda a: artifact_sets[a].get(role, 0), reverse=True)[:4]
+    # 2. Select Weapon (with safety check)
+    weapons = db.query(Weapon).all()
+    if not weapons:
+        # Fallback if DB is empty
+        return Build(weapon="Default Sword", artifacts="[]", stats="{}", notes="No weapons in DB")
 
-    # Crear estadísticas simples
-    stats = {"ATK%": "30%", "CRIT Rate": "15%", "CRIT DMG": "50%"}
+    best_weapon = max(weapons, key=lambda w: score_weapon(w.type, character.role))
 
-    # Guardar la build en la base de datos
-    build = Build(
+    # 3. Select Artifacts
+    artifacts = db.query(Artifact).all()
+    best_artifacts = sorted(
+        artifacts, 
+        key=lambda a: score_artifact_set(a.role, character.role), 
+        reverse=True
+    )[:4]
+
+    # 4. Generate Stats
+    stats = {
+        "ATK%": "35%", "CRIT Rate": "20%", "CRIT DMG": "50%"
+    } if character.role == "DPS" else {
+        "HP%": "30%", "Healing Bonus": "15%"
+    }
+
+    # 5. Save and Return
+    new_build = Build(
         character_id=character.id,
-        weapon=best_weapon,
-        artifacts=json.dumps(best_artifacts),
+        weapon=best_weapon.name,
+        artifacts=json.dumps([a.name for a in best_artifacts]),
         stats=json.dumps(stats),
-        notes=f"Build generada para maximizar el rol {role} del personaje."
+        notes=f"Build optimizada para {character.role}."
     )
-    db.add(build)
+
+    db.add(new_build)
     db.commit()
-    db.refresh(build)
-    return build
+    db.refresh(new_build)
+    return new_build
