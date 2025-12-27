@@ -1,28 +1,38 @@
-from fastapi import APIRouter
-from services.external_api import fetch_characters_from_api
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from services.build_logic import generate_build
+from models.character import Character
+from models.build import Build  # Corrected Import
+from database import SessionLocal
 from urllib.parse import unquote
+import json
 
 router = APIRouter()
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 @router.get("/{character_name}")
-def get_build(character_name: str):
-    character_name = unquote(character_name)  # Decodifica caracteres URL
-    characters = fetch_characters_from_api()
-    character = next((c for c in characters if c["name"].lower() == character_name.lower()), None)
-    
+def get_build(character_name: str, db: Session = Depends(get_db)):
+    character_name = unquote(character_name)
+    # ilike is great here for case-insensitive matching
+    character = db.query(Character).filter(Character.name.ilike(character_name)).first()
+
     if not character:
         return {"error": "Character not found"}
 
-    build = {
-        "character": character["name"],
-        "weapon": "Weapon recomendado basado en su rol",
-        "artifacts": ["Artifact 1", "Artifact 2", "Artifact 3", "Artifact 4"],
-        "stats": {
-            "ATK%": "30%",
-            "CRIT Rate": "15%",
-            "CRIT DMG": "50%"
-        },
-        "notes": "Esta build maximiza el DPS del personaje."
+    build = generate_build(character, db)
+
+    build_data = {
+        "character": character.name,
+        "weapon": build.weapon,
+        "artifacts": json.loads(build.artifacts) if isinstance(build.artifacts, str) else build.artifacts,
+        "stats": json.loads(build.stats) if isinstance(build.stats, str) else build.stats,
+        "notes": build.notes
     }
 
-    return {"build": build}
+    return {"build": build_data}
